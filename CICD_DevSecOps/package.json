@@ -1,0 +1,27 @@
+{
+  "name": "devsecops-demo-app",
+  "version": "1.0.0",
+  "description": "Sample service used to demonstrate a CI/CD + DevSecOps pipeline",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "build": "node scripts/build.js",
+    "test": "jest --coverage",
+    "lint": "node --check src/server.js && node --check src/app.js"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "helmet": "^8.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": ["src/**/*.js", "!src/server.js"],
+    "coverageThreshold": { "global": { "lines": 80, "functions": 80 } }
+  }
+}

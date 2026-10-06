@@ -1,0 +1,11 @@
+rules:
+  - id: no-eval
+    languages: [javascript]
+    severity: ERROR
+    message: Avoid eval(); it enables code injection.
+    pattern: eval(...)
+  - id: no-child-process-exec-with-input
+    languages: [javascript]
+    severity: ERROR
+    message: child_process.exec with dynamic input risks command injection.
+    pattern: $CP.exec($X + ...)

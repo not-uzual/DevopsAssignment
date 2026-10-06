@@ -1,0 +1,218 @@
+name: CI/CD + DevSecOps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/devsecops-demo
+  NODE_VERSION: "22"
+  SEVERITY_GATE: HIGH,CRITICAL
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 1. BUILD
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+      - run: npm ci
+      - run: npm run build
+
+  # 2. UNIT TEST
+  unit-test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+      - run: npm ci
+      - run: npm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: coverage, path: coverage/ }
+
+  # 3. SAST - Semgrep (community + custom rules); fails on any finding
+  sast:
+    needs: unit-test
+    runs-on: ubuntu-latest
+    container: semgrep/semgrep:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep scan
+        run: >
+          semgrep scan --error --metrics=off
+          --config p/javascript --config p/nodejs --config p/owasp-top-ten
+          --config .semgrep/custom.yml
+          --sarif --output semgrep.sarif src/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: sast-semgrep-sarif, path: semgrep.sarif }
+
+  # 4. SCA - dependency vulnerabilities
+  sca:
+    needs: sast
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+      - run: npm ci
+      - name: npm audit (production deps, fail on high+)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Trivy filesystem scan (lockfile)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: ${{ env.SEVERITY_GATE }}
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+  # 5. SECRET SCAN - full git history
+  secret-scan:
+    needs: sca
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # 6. DOCKER BUILD (not pushed yet; saved as artifact so the scanned image == the pushed image)
+  docker-build:
+    needs: secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: GIT_SHA=${{ github.sha }}
+          outputs: type=docker,dest=/tmp/image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: actions/upload-artifact@v4
+        with: { name: image, path: /tmp/image.tar, retention-days: 1 }
+
+  # 7. CONTAINER IMAGE SCAN
+  image-scan:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: image, path: /tmp }
+      - name: Load image
+        run: docker load -i /tmp/image.tar
+      - name: Trivy image scan (full report, non-blocking)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-image.sarif
+          exit-code: "0"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: image-scan-sarif, path: trivy-image.sarif }
+      - name: Trivy image scan (enforce)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          severity: ${{ env.SEVERITY_GATE }}
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+  # 8. SECURITY GATE - single choke point; nothing is pushed unless every scan passed
+  security-gate:
+    needs: [sast, sca, secret-scan, image-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate gate
+        run: |
+          echo "SAST:         ${{ needs.sast.result }}"
+          echo "SCA:          ${{ needs.sca.result }}"
+          echo "Secret scan:  ${{ needs.secret-scan.result }}"
+          echo "Image scan:   ${{ needs.image-scan.result }}"
+          for r in "${{ needs.sast.result }}" "${{ needs.sca.result }}" \
+                   "${{ needs.secret-scan.result }}" "${{ needs.image-scan.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::Security gate FAILED - blocking push and deploy"
+              exit 1
+            fi
+          done
+          echo "Security gate PASSED"
+
+  # 9. PUSH IMAGE (main branch only)
+  push-image:
+    needs: security-gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: image, path: /tmp }
+      - run: docker load -i /tmp/image.tar
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag and push
+        run: |
+          SRC=${{ env.IMAGE_NAME }}:${{ github.sha }}
+          DST=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          docker tag "$SRC" "$DST:${{ github.sha }}"
+          docker tag "$SRC" "$DST:latest"
+          docker push "$DST:${{ github.sha }}"
+          docker push "$DST:latest"
+
+  # 10. DEPLOY TO KUBERNETES
+  deploy:
+    needs: push-image
+    runs-on: ubuntu-latest
+    environment: production # configure required reviewers here for manual approval
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_B64 }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+      - name: Set image tag and apply
+        working-directory: k8s
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          sed -i "s#ghcr.io/OWNER/#ghcr.io/${OWNER}/#g" kustomization.yaml deployment.yaml
+          kubectl kustomize . | sed "s#ghcr.io/${OWNER}/devsecops-demo:latest#ghcr.io/${OWNER}/devsecops-demo:${{ github.sha }}#" | kubectl apply -f -
+      - name: Wait for rollout
+        run: kubectl -n devsecops-demo rollout status deployment/devsecops-demo --timeout=120s
+      - name: Rollback on failure
+        if: failure()
+        run: kubectl -n devsecops-demo rollout undo deployment/devsecops-demo
