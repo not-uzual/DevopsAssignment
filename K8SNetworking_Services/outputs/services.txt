@@ -1,0 +1,6 @@
+NAME               TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+external-google    ExternalName   <none>          google.com    <none>         3m3s
+web-clusterip      ClusterIP      10.109.7.85     <none>        80/TCP         12m
+web-headless       ClusterIP      None            <none>        80/TCP         77s
+web-loadbalancer   LoadBalancer   10.97.169.127   <pending>     80:30786/TCP   6m43s
+web-nodeport       NodePort       10.99.76.42     <none>        80:30080/TCP   8m29s

@@ -1,0 +1,16 @@
+Name:                     web-clusterip
+Namespace:                services-lab
+Labels:                   <none>
+Annotations:              <none>
+Selector:                 app=web
+Type:                     ClusterIP
+IP Family Policy:         SingleStack
+IP Families:              IPv4
+IP:                       10.109.7.85
+IPs:                      10.109.7.85
+Port:                     <unset>  80/TCP
+TargetPort:               80/TCP
+Endpoints:                10.244.0.75:80,10.244.0.77:80,10.244.0.76:80
+Session Affinity:         None
+Internal Traffic Policy:  Cluster
+Events:                   <none>
