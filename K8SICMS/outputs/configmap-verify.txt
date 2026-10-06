@@ -1,0 +1,19 @@
+=== kubectl exec configmap-demo -- env | grep APP_ ===
+APP_GREETING=Hello from ConfigMap
+APP_COLOR=blue
+APP_ENV=production
+
+=== kubectl exec configmap-demo -- cat /etc/config/config.properties ===
+log.level=INFO
+cache.enabled=true
+
+=== kubectl exec configmap-demo -- ls -la /etc/config ===
+total 16
+drwxrwxrwx 3 root root 4096 Oct  6 21:00 .
+drwxr-xr-x 1 root root 4096 Oct  6 21:00 ..
+drwxr-xr-x 2 root root 4096 Oct  6 21:00 ..2026_10_06_21_00_37.2919710667
+lrwxrwxrwx 1 root root   32 Oct  6 21:00 ..data -> ..2026_10_06_21_00_37.2919710667
+lrwxrwxrwx 1 root root   16 Oct  6 21:00 APP_COLOR -> ..data/APP_COLOR
+lrwxrwxrwx 1 root root   14 Oct  6 21:00 APP_ENV -> ..data/APP_ENV
+lrwxrwxrwx 1 root root   19 Oct  6 21:00 APP_GREETING -> ..data/APP_GREETING
+lrwxrwxrwx 1 root root   24 Oct  6 21:00 config.properties -> ..data/config.properties

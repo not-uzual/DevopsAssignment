@@ -1,0 +1,39 @@
+=== PROBLEM REPORT: 'broken-web-svc' is not routing traffic to any Pod ===
+
+=== kubectl get pods -n icms-lab -l app=broken-web -o wide ===
+NAME                          READY   STATUS    RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+broken-web-58f69d4c97-9x294   1/1     Running   0          9s    10.244.0.89   minikube   <none>           <none>
+broken-web-58f69d4c97-c8dwz   1/1     Running   0          9s    10.244.0.88   minikube   <none>           <none>
+
+=== kubectl get deployment broken-web -n icms-lab ===
+NAME         READY   UP-TO-DATE   AVAILABLE   AGE
+broken-web   2/2     2            2           9s
+
+=== kubectl get svc,endpoints broken-web-svc -n icms-lab ===
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                     TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/broken-web-svc   ClusterIP   10.103.51.189   <none>        80/TCP    9s
+
+NAME                       ENDPOINTS   AGE
+endpoints/broken-web-svc   <none>      9s
+
+=== kubectl describe svc broken-web-svc -n icms-lab ===
+Name:                     broken-web-svc
+Namespace:                icms-lab
+Labels:                   <none>
+Annotations:              <none>
+Selector:                 app=broken-wb
+Type:                     ClusterIP
+IP Family Policy:         SingleStack
+IP Families:              IPv4
+IP:                       10.103.51.189
+IPs:                      10.103.51.189
+Port:                     <unset>  80/TCP
+TargetPort:               80/TCP
+Endpoints:                
+Session Affinity:         None
+Internal Traffic Policy:  Cluster
+Events:                   <none>
+
+=== Attempt to reach the Service (port-forward) ===
+curl FAILED: 7

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: broken-web-svc
+  namespace: icms-lab
+spec:
+  type: ClusterIP
+  selector:
+    # BUG: typo in selector - Deployment pods are labeled app=broken-web, not app=broken-wb
+    app: broken-wb
+  ports:
+    - port: 80
+      targetPort: 80

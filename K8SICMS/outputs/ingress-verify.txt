@@ -1,0 +1,54 @@
+=== kubectl get ingress -n icms-lab ===
+NAME               CLASS   HOSTS        ADDRESS   PORTS   AGE
+icms-web-ingress   nginx   icms.local             80      23s
+
+=== kubectl describe ingress icms-web-ingress -n icms-lab ===
+Name:             icms-web-ingress
+Labels:           <none>
+Namespace:        icms-lab
+Address:          
+Ingress Class:    nginx
+Default backend:  <default>
+Rules:
+  Host        Path  Backends
+  ----        ----  --------
+  icms.local  
+              /   icms-web-svc:80 (10.244.0.86:80,10.244.0.87:80)
+Annotations:  nginx.ingress.kubernetes.io/rewrite-target: /
+Events:
+  Type    Reason  Age   From                      Message
+  ----    ------  ----  ----                      -------
+  Normal  Sync    23s   nginx-ingress-controller  Scheduled for sync
+
+=== kubectl get svc,endpoints -n icms-lab ===
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                   TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)   AGE
+service/icms-web-svc   ClusterIP   10.97.49.19   <none>        80/TCP    23s
+
+NAME                     ENDPOINTS                       AGE
+endpoints/icms-web-svc   10.244.0.86:80,10.244.0.87:80   23s
+
+=== curl -H 'Host: icms.local' http://localhost:18080/  (request #1) ===
+<h1>Hello from icms-web via Ingress</h1><p>Served by pod: icms-web-5779c7bc8b-vfdbf</p>
+
+=== curl -H 'Host: icms.local' http://localhost:18080/  (request #2, to show load balancing across pods) ===
+<h1>Hello from icms-web via Ingress</h1><p>Served by pod: icms-web-5779c7bc8b-vfdbf</p>
+
+=== curl -v -H 'Host: icms.local' http://localhost:18080/  (headers) ===
+HTTP/1.1 200 OK
+Date: Tue, 06 Oct 2026 21:01:36 GMT
+Content-Type: text/html
+Content-Length: 88
+Connection: keep-alive
+Last-Modified: Tue, 06 Oct 2026 21:01:26 GMT
+ETag: "6ac561a6-58"
+Accept-Ranges: bytes
+
+
+=== curl with WRONG host (should 404 via default backend, proving routing is host-based) ===
+HTTP/1.1 404 Not Found
+Date: Tue, 06 Oct 2026 21:01:36 GMT
+Content-Type: text/html
+Content-Length: 146
+Connection: keep-alive
+

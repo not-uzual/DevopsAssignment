@@ -1,0 +1,51 @@
+=== kubectl get configmap app-config -n icms-lab -o yaml ===
+apiVersion: v1
+data:
+  APP_COLOR: blue
+  APP_ENV: production
+  APP_GREETING: Hello from ConfigMap
+  config.properties: |
+    log.level=INFO
+    cache.enabled=true
+kind: ConfigMap
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","data":{"APP_COLOR":"blue","APP_ENV":"production","APP_GREETING":"Hello from ConfigMap","config.properties":"log.level=INFO\ncache.enabled=true\n"},"kind":"ConfigMap","metadata":{"annotations":{},"name":"app-config","namespace":"icms-lab"}}
+  creationTimestamp: "2026-10-06T21:00:36Z"
+  name: app-config
+  namespace: icms-lab
+  resourceVersion: "18789"
+  uid: 89abf1c6-4197-4c88-8969-8f775b7c5e76
+
+=== kubectl describe configmap app-config -n icms-lab ===
+Name:         app-config
+Namespace:    icms-lab
+Labels:       <none>
+Annotations:  <none>
+
+Data
+====
+APP_COLOR:
+----
+blue
+
+APP_ENV:
+----
+production
+
+APP_GREETING:
+----
+Hello from ConfigMap
+
+config.properties:
+----
+log.level=INFO
+cache.enabled=true
+
+
+
+BinaryData
+====
+
+Events:  <none>
