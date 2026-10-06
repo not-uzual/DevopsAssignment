@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cc-demo
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.27
+      volumeMounts:
+        - name: app-config
+          mountPath: /etc/app
+  volumes:
+    - name: app-config
+      configMap:
+        name: missing-config

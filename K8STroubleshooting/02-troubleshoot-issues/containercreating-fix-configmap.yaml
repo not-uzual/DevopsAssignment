@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: missing-config
+data:
+  app.properties: |
+    mode=production
