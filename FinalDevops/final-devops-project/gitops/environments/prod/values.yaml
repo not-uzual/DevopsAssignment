@@ -1,0 +1,27 @@
+# Desired state of production. CI bumps image.tag in a commit; Argo CD reconciles the cluster to match.
+replicaCount: 2
+
+image:
+  repository: ghcr.io/OWNER/notes-api
+  tag: "latest"
+
+config:
+  APP_ENV: production
+  GREETING: Hello from notes-api (GitOps)
+
+# Secret is NOT stored in Git. Create it out of band (or via External Secrets / Sealed Secrets):
+#   kubectl -n devops-final create secret generic notes-api-secret --from-literal=API_KEY=...
+secret:
+  create: false
+  existingSecret: notes-api-secret
+
+ingress:
+  host: notes.example.com
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 6
+
+metrics:
+  serviceMonitor:
+    enabled: true

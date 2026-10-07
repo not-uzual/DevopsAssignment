@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: final-devops
+  namespace: argocd
+spec:
+  description: Final DevOps project
+  sourceRepos: ["*"]
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: devops-final }
+    - { server: https://kubernetes.default.svc, namespace: monitoring }
+    - { server: https://kubernetes.default.svc, namespace: argocd }
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }
+    - { group: "*", kind: "CustomResourceDefinition" }
+    - { group: "rbac.authorization.k8s.io", kind: "*" }
+    - { group: "admissionregistration.k8s.io", kind: "*" }

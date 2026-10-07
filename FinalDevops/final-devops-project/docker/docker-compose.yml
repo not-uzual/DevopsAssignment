@@ -1,0 +1,18 @@
+# Local run:  docker compose -f docker/docker-compose.yml up --build
+services:
+  notes-api:
+    build:
+      context: ../application
+      dockerfile: ../docker/Dockerfile
+    ports: ["3000:3000"]
+    environment:
+      APP_ENV: local
+      API_KEY: local-dev-key   # local only; Kubernetes uses a Secret
+    volumes:
+      - notes-data:/data
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+volumes:
+  notes-data:

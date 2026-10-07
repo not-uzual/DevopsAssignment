@@ -1,0 +1,124 @@
+# TROUBLESHOOTING CHALLENGE: this deployment is intentionally broken (several independent faults).
+# Deploy:  kubectl apply -f troubleshooting/broken/app.yaml
+# Goal:    get `curl -H "Host: notes-broken.local" <ingress>/notes` returning 200 from this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devops-final-broken
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notes-api-config
+  namespace: devops-final-broken
+data:
+  APP_ENV: "staging"
+  GREETING: "Hello from the broken namespace"
+  MAX_NOTE_LENGTH: "280"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: notes-api-secret
+  namespace: devops-final-broken
+type: Opaque
+stringData:
+  API_KEY: "challenge-key"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: notes-api-data
+  namespace: devops-final-broken
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-api
+  namespace: devops-final-broken
+  labels: { app: notes-api }
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: notes-api }
+  template:
+    metadata:
+      labels: { app: notes-api }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: notes-api
+          image: notes-api:v1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef: { name: notes-api-config }
+            - secretRef: { name: notes-api-secrets }
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 8Mi }
+            limits: { cpu: 250m, memory: 10Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: notes-api-data }
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notes-api
+  namespace: devops-final-broken
+spec:
+  selector: { app: notes-app }
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: notes-api
+  namespace: devops-final-broken
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: notes-broken.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: notes-api-svc
+                port: { name: http }

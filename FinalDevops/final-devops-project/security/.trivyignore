@@ -1,0 +1,2 @@
+# Accepted risks only, each with justification and an expiry date. Example:
+# CVE-2024-00000  # no fix available, not reachable; revisit 2026-12-01

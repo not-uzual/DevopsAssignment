@@ -1,0 +1,29 @@
+# helm install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace -f monitoring/kube-prometheus-stack-values.yaml
+prometheus:
+  prometheusSpec:
+    # Pick up ServiceMonitors/PrometheusRules from any namespace, not only those labelled release=monitoring
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 7d
+    resources:
+      requests: { cpu: 100m, memory: 400Mi }
+grafana:
+  adminPassword: change-me   # use an existing secret in real use
+  sidecar:
+    dashboards:
+      enabled: true          # loads any ConfigMap labelled grafana_dashboard=1
+      searchNamespace: ALL
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki.monitoring.svc:3100
+alertmanager:
+  config:
+    route:
+      receiver: "null"
+      routes:
+        - receiver: "null"
+          matchers: ['alertname = "Watchdog"']
+    receivers:
+      - name: "null"
+      # Add slack_configs / pagerduty_configs / email_configs receivers here.

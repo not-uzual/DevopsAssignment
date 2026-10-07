@@ -1,0 +1,20 @@
+$ curl -s localhost:8081/
+{"message":"Hello from notes-api on Kubernetes","env":"production"}
+$ curl -s -XPOST localhost:8081/notes -H 'content-type: application/json' -d '{"text":"no key"}' -w ' [HTTP %{http_code}]'
+{"error":"invalid or missing API key"} [HTTP 401]
+$ curl -s -XPOST localhost:8081/notes -H 'x-api-key: change-me-demo-key' -H 'content-type: application/json' -d '{"text":"first note"}'
+{"id":1,"text":"first note","createdAt":"2026-10-07T00:17:40.674Z"}
+$ kubectl -n devops-final delete pod -l app=notes-api
+pod "notes-api-78489cc894-hfgn6" deleted from devops-final namespace
+
+$ kubectl -n devops-final rollout status deploy/notes-api --timeout=90s
+Waiting for deployment "notes-api" rollout to finish: 0 of 1 updated replicas are available...
+deployment "notes-api" successfully rolled out
+
+$ curl -s localhost:8081/notes   # note survived the pod restart (PVC)
+[{"id":1,"text":"first note","createdAt":"2026-10-07T00:17:40.674Z"}]
+$ curl -s -H 'Host: notes.local' localhost:8082/   # via Ingress
+{"message":"Hello from notes-api on Kubernetes","env":"production"}
+$ kubectl -n devops-final top pod
+error: metrics not available yet
+

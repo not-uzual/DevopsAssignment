@@ -1,0 +1,6 @@
+notes-api deployed as release "{{ .Release.Name }}".
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "notes-api.fullname" . }} 8080:{{ .Values.service.port }}
+  curl localhost:8080/
+{{- if .Values.ingress.enabled }}
+Ingress host: {{ .Values.ingress.host }}
+{{- end }}

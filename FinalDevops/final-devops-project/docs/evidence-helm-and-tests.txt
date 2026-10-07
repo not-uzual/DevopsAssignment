@@ -1,0 +1,82 @@
+$ helm lint helm/notes-api
+==> Linting helm/notes-api
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+
+$ helm list -A | grep -E 'NAME|notes'
+NAME 	NAMESPACE        	REVISION	UPDATED                             	STATUS  	CHART          	APP VERSION
+notes	devops-final-helm	1       	2026-10-07 05:48:18.226186 +0530 IST	deployed	notes-api-0.1.0	1.0.0      
+
+$ kubectl -n devops-final-helm get deploy,svc,pvc,hpa,ingress
+NAME                    READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/notes   1/1     1            1           8m16s
+
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/notes   ClusterIP   10.101.108.24   <none>        80/TCP    8m16s
+
+NAME                               STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/notes-data   Bound    pvc-a656346b-2851-44da-9bf6-8ced7fd0d067   1Gi        RWO            standard       <unset>                 8m16s
+
+NAME                                        REFERENCE          TARGETS        MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/notes   Deployment/notes   cpu: 16%/60%   1         4         1          8m16s
+
+NAME                              CLASS   HOSTS              ADDRESS        PORTS   AGE
+ingress.networking.k8s.io/notes   nginx   notes-helm.local   192.168.49.2   80      8m16s
+
+$ (cd application && npm test 2>&1 | grep -E 'Tests:|Test Suites:|All files|app.js|store.js|✓|✕')
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+      at log (src/app.js:9:11)
+    ✓ GET /healthz (30 ms)
+    ✓ GET /readyz ready when storage writable (22 ms)
+    ✓ GET / returns greeting and env (7 ms)
+    ✓ GET /version (4 ms)
+    ✓ POST without key is 401 (17 ms)
+    ✓ POST with key creates, GET lists (6 ms)
+    ✓ rejects empty and oversized notes (4 ms)
+    ✓ notes persist across store instances (PVC behavior) (5 ms)
+    ✓ /metrics exposes http and notes metrics (6 ms)
+    ✓ security headers set, x-powered-by hidden (2 ms)
+    ✓ GET /burn returns (43 ms)
+All files |   94.93 |    86.48 |      95 |   94.52 |                   
+ app.js   |   96.87 |    85.71 |     100 |   96.55 | 65,75             
+ store.js |   86.66 |      100 |      80 |   86.66 | 30-31             
+Test Suites: 1 passed, 1 total
+Tests:       11 passed, 11 total
+
+$ docker images notes-api --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+notes-api:v1 247MB
+
+$ helm upgrade notes helm/notes-api -n devops-final-helm --set ingress.host=notes-helm.local --set config.GREETING='v2 greeting' --wait --timeout 90s | head -6
+Release "notes" has been upgraded. Happy Helming!
+NAME: notes
+LAST DEPLOYED: Wed Oct  7 05:56:35 2026
+NAMESPACE: devops-final-helm
+STATUS: deployed
+REVISION: 2
+
+$ helm history notes -n devops-final-helm
+REVISION	UPDATED                 	STATUS    	CHART          	APP VERSION	DESCRIPTION     
+1       	Wed Oct  7 05:48:18 2026	superseded	notes-api-0.1.0	1.0.0      	Install complete
+2       	Wed Oct  7 05:56:35 2026	deployed  	notes-api-0.1.0	1.0.0      	Upgrade complete
+
+$ helm rollback notes 1 -n devops-final-helm --wait --timeout 90s
+Rollback was a success! Happy Helming!
+
+$ helm history notes -n devops-final-helm
+REVISION	UPDATED                 	STATUS    	CHART          	APP VERSION	DESCRIPTION     
+1       	Wed Oct  7 05:48:18 2026	superseded	notes-api-0.1.0	1.0.0      	Install complete
+2       	Wed Oct  7 05:56:35 2026	superseded	notes-api-0.1.0	1.0.0      	Upgrade complete
+3       	Wed Oct  7 05:56:40 2026	deployed  	notes-api-0.1.0	1.0.0      	Rollback to 1   
+

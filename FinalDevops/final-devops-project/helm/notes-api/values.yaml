@@ -1,0 +1,46 @@
+replicaCount: 1
+
+image:
+  repository: notes-api
+  tag: v1
+  pullPolicy: IfNotPresent
+
+config:
+  APP_ENV: production
+  GREETING: Hello from notes-api (Helm)
+  MAX_NOTE_LENGTH: "280"
+
+# Secret: set apiKey at install time (--set secret.apiKey=...) or point to an existing secret.
+secret:
+  create: true
+  existingSecret: ""
+  apiKey: change-me-demo-key
+
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  host: notes.local
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 60
+
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 128Mi }
+
+# Create a ServiceMonitor for the Prometheus Operator (needs its CRDs installed).
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 15s

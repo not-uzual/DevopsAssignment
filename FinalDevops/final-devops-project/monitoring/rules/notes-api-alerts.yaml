@@ -1,0 +1,52 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: notes-api
+  namespace: monitoring
+  labels: { release: monitoring }
+spec:
+  groups:
+    - name: notes-api
+      rules:
+        - alert: NotesApiDown
+          expr: absent(up{namespace="devops-final"} == 1)
+          for: 1m
+          labels: { severity: critical }
+          annotations:
+            summary: notes-api has no healthy scrape target
+        - alert: NotesApiHighErrorRate
+          expr: |
+            sum(rate(http_request_duration_seconds_count{namespace="devops-final",status=~"5.."}[5m]))
+              / sum(rate(http_request_duration_seconds_count{namespace="devops-final"}[5m])) > 0.05
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: More than 5% of notes-api requests are failing
+        - alert: NotesApiHighLatencyP95
+          expr: |
+            histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace="devops-final"}[5m])) by (le)) > 0.5
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: notes-api p95 latency above 500ms
+        - alert: NotesApiPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="devops-final"}[15m]) > 2
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.pod }} restarted more than twice in 15m (check OOMKilled / probes)"
+        - alert: NotesApiMemoryNearLimit
+          expr: |
+            max(container_memory_working_set_bytes{namespace="devops-final",container="notes-api"})
+              / max(kube_pod_container_resource_limits{namespace="devops-final",container="notes-api",resource="memory"}) > 0.9
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: notes-api memory above 90% of its limit
+        - alert: NotesApiHpaMaxedOut
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{namespace="devops-final"}
+              == kube_horizontalpodautoscaler_spec_max_replicas{namespace="devops-final"}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: HPA has been at max replicas for 10m, consider raising maxReplicas

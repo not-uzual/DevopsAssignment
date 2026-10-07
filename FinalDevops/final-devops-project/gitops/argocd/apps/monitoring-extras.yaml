@@ -1,0 +1,17 @@
+# Alert rules + dashboards kept in Git and synced as plain manifests.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-extras
+  namespace: argocd
+spec:
+  project: final-devops
+  source:
+    repoURL: https://github.com/YOUR_USER/final-devops-project.git # <-- change me
+    targetRevision: main
+    path: monitoring/rules
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }

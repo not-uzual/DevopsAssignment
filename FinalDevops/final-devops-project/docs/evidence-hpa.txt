@@ -1,0 +1,17 @@
+$ kubectl -n devops-final get hpa,pods   # under load (4 busybox loops hitting /burn)
+NAME                                            REFERENCE              TARGETS         MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/notes-api   Deployment/notes-api   cpu: 496%/60%   1         4         1          2m46s
+
+NAME                             READY   STATUS    RESTARTS   AGE
+pod/notes-api-78489cc894-2xnq5   1/1     Running   0          2m32s
+pod/notes-api-78489cc894-d77mg   1/1     Running   0          15s
+pod/notes-api-78489cc894-kvgzk   1/1     Running   0          15s
+pod/notes-api-78489cc894-l8wzl   1/1     Running   0          15s
+
+$ kubectl -n devops-final describe hpa notes-api | tail -6
+  ----     ------                        ----                 ----                       -------
+  Warning  FailedGetResourceMetric       90s (x6 over 2m46s)  horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: no metrics returned from resource metrics API
+  Warning  FailedComputeMetricsReplicas  90s (x6 over 2m46s)  horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: unable to get metrics for resource cpu: no metrics returned from resource metrics API
+  Warning  FailedGetResourceMetric       30s (x4 over 75s)    horizontal-pod-autoscaler  failed to get cpu utilization: did not receive metrics for targeted pods (pods might be unready)
+  Warning  FailedComputeMetricsReplicas  30s (x4 over 75s)    horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: did not receive metrics for targeted pods (pods might be unready)
+  Normal   SuccessfulRescale             15s                  horizontal-pod-autoscaler  New size: 4; reason: cpu resource utilization (percentage of request) above target

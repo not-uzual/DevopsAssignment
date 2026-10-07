@@ -1,0 +1,246 @@
+name: CI/CD + DevSecOps
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["gitops/**", "**.md", "docs/**"]   # the GitOps bot commit must not retrigger the pipeline
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/notes-api
+  NODE_VERSION: "22"
+  SEVERITY_GATE: HIGH,CRITICAL
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 1. BUILD
+  build:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: application } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: application/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  # 2. UNIT TEST
+  unit-test:
+    needs: build
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: application } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: application/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: coverage, path: application/coverage/ }
+
+  # 3. SAST
+  sast:
+    needs: unit-test
+    runs-on: ubuntu-latest
+    container: semgrep/semgrep:latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: >
+          semgrep scan --error --metrics=off
+          --config p/javascript --config p/nodejs --config p/owasp-top-ten
+          --config security/semgrep-rules.yml
+          --sarif --output semgrep.sarif application/src
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: sast-sarif, path: semgrep.sarif }
+
+  # 4. SCA
+  sca:
+    needs: sast
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}" }
+      - name: npm audit (production deps)
+        working-directory: application
+        run: npm ci && npm audit --omit=dev --audit-level=high
+      - name: Trivy filesystem (lockfile) scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: application
+          scanners: vuln
+          severity: ${{ env.SEVERITY_GATE }}
+          ignore-unfixed: true
+          exit-code: "1"
+        env:
+          TRIVY_IGNOREFILE: security/.trivyignore
+
+  # 5. SECRET SCAN (full history)
+  secret-scan:
+    needs: sca
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: security/gitleaks.toml
+
+  # 5b. IaC / Kubernetes misconfiguration scan (Terraform, Helm, manifests, Dockerfile)
+  iac-scan:
+    needs: secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          skip-dirs: troubleshooting
+          severity: ${{ env.SEVERITY_GATE }}
+          exit-code: "1"
+          format: table
+
+  # 6. DOCKER BUILD (saved as an artifact: the image scanned is the image pushed)
+  docker-build:
+    needs: iac-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: application
+          file: docker/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: GIT_SHA=${{ github.sha }}
+          outputs: type=docker,dest=/tmp/image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: actions/upload-artifact@v4
+        with: { name: image, path: /tmp/image.tar, retention-days: 1 }
+
+  # 7. IMAGE SCAN
+  image-scan:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: image, path: /tmp }
+      - run: docker load -i /tmp/image.tar
+      - name: Trivy image report (non-blocking, SARIF)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-image.sarif
+          exit-code: "0"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: image-scan-sarif, path: trivy-image.sarif }
+      - name: Trivy image scan (enforce)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          severity: ${{ env.SEVERITY_GATE }}
+          ignore-unfixed: true
+          exit-code: "1"
+        env:
+          TRIVY_IGNOREFILE: security/.trivyignore
+
+  # 8. SECURITY GATE
+  security-gate:
+    needs: [sast, sca, secret-scan, iac-scan, image-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate
+        run: |
+          echo "SAST=${{ needs.sast.result }} SCA=${{ needs.sca.result }} SECRETS=${{ needs.secret-scan.result }} IAC=${{ needs.iac-scan.result }} IMAGE=${{ needs.image-scan.result }}"
+          for r in "${{ needs.sast.result }}" "${{ needs.sca.result }}" "${{ needs.secret-scan.result }}" \
+                   "${{ needs.iac-scan.result }}" "${{ needs.image-scan.result }}"; do
+            [ "$r" = "success" ] || { echo "::error::Security gate FAILED"; exit 1; }
+          done
+          echo "Security gate PASSED"
+
+  # 9. PUSH IMAGE (main only)
+  push-image:
+    needs: security-gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: image, path: /tmp }
+      - run: docker load -i /tmp/image.tar
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          DST=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} "$DST:${{ github.sha }}"
+          docker push "$DST:${{ github.sha }}"
+
+  # 10a. GITOPS DEPLOY: CI only bumps the image tag in Git; Argo CD does the actual deploy.
+  update-gitops:
+    needs: push-image
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bump image tag in gitops values
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          sed -i "s#^\(\s*repository:\).*#\1 ghcr.io/${OWNER}/notes-api#; s#^\(\s*tag:\).*#\1 \"${{ github.sha }}\"#" gitops/environments/prod/values.yaml
+      - name: Commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gitops/environments/prod/values.yaml
+          git diff --cached --quiet || git commit -m "ci: deploy notes-api ${{ github.sha }}"
+          git push
+
+  # 10b. DIRECT DEPLOY (optional, manual): helm upgrade straight from CI, for clusters without Argo CD
+  deploy-helm:
+    needs: push-image
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: azure/setup-kubectl@v4
+      - name: kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_B64 }}" | base64 -d > ~/.kube/config && chmod 600 ~/.kube/config
+      - name: Helm upgrade
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          helm upgrade --install notes helm/notes-api -n devops-final --create-namespace \
+            --set image.repository=ghcr.io/${OWNER}/notes-api --set image.tag=${{ github.sha }} \
+            --set secret.apiKey='${{ secrets.NOTES_API_KEY }}' \
+            --wait --timeout 3m --atomic

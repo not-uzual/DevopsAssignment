@@ -1,0 +1,8 @@
+title = "gitleaks config"
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Demo values and lockfiles"
+paths = ['''package-lock\.json''', '''kubernetes/secret\.yaml''', '''troubleshooting/broken/app\.yaml''']
+regexes = ['''change-me-demo-key''', '''challenge-key''']

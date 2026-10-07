@@ -1,0 +1,144 @@
+
+### SYMPTOM 1: pod Pending
+$ kubectl -n devops-final-broken get pods,pvc
+NAME                             READY   STATUS    RESTARTS   AGE
+pod/notes-api-74f5f585f7-vrffv   0/1     Pending   0          20s
+
+NAME                                   STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/notes-api-data   Pending                                      fast-ssd       <unset>                 20s
+$ kubectl -n devops-final-broken describe pvc notes-api-data | grep -A3 Events
+Events:
+  Type     Reason              Age               From                         Message
+  ----     ------              ----              ----                         -------
+  Warning  ProvisioningFailed  3s (x3 over 20s)  persistentvolume-controller  storageclass.storage.k8s.io "fast-ssd" not found
+
+### FIX 1: PVC storageClassName fast-ssd -> standard (PVC spec is immutable, so delete + recreate)
+$ kubectl -n devops-final-broken delete pvc notes-api-data
+persistentvolumeclaim "notes-api-data" deleted from devops-final-broken namespace
+
+### SYMPTOM 2: ImagePullBackOff
+$ kubectl -n devops-final-broken get pods
+NAME                         READY   STATUS         RESTARTS   AGE
+notes-api-74f5f585f7-tnskr   0/1     ErrImagePull   0          15s
+$ kubectl -n devops-final-broken describe pod -l app=notes-api | grep -E 'Failed to pull' | head -1 | cut -c1-200
+  Warning  Failed     12s   kubelet            spec.containers{notes-api}: Failed to pull image "notes-api:v1.0.0": failed to pull and unpack image "docker.io/library/notes-api:v1.0.0": failed to reso
+
+### FIX 2: image tag notes-api:v1.0.0 does not exist -> notes-api:v1
+$ kubectl -n devops-final-broken set image deploy/notes-api notes-api=notes-api:v1
+deployment.apps/notes-api image updated
+
+### SYMPTOM 3: CreateContainerConfigError
+$ kubectl -n devops-final-broken get pods
+NAME                         READY   STATUS                       RESTARTS   AGE
+notes-api-547cd977cc-cvbn9   0/1     CreateContainerConfigError   0          11s
+$ kubectl -n devops-final-broken describe pod -l app=notes-api | grep -E 'Error: secret'
+  Warning  Failed     10s (x2 over 10s)  kubelet            spec.containers{notes-api}: Error: secret "notes-api-secrets" not found
+$ kubectl -n devops-final-broken get secret
+NAME               TYPE     DATA   AGE
+notes-api-secret   Opaque   1      48s
+
+### FIX 3: secretRef name typo notes-api-secrets -> notes-api-secret
+$ kubectl -n devops-final-broken patch deploy notes-api --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/envFrom/1/secretRef/name","value":"notes-api-secret"}]'
+deployment.apps/notes-api patched
+
+### SYMPTOM 4: CrashLoopBackOff (OOMKilled)
+$ kubectl -n devops-final-broken get pods
+NAME                         READY   STATUS             RESTARTS      AGE
+notes-api-58595c4b98-jpmfq   0/1     CrashLoopBackOff   2 (12s ago)   25s
+$ kubectl -n devops-final-broken describe pod -l app=notes-api | grep -A3 'Last State'
+    Last State:     Terminated
+      Reason:       OOMKilled
+      Exit Code:    137
+      Started:      Wed, 07 Oct 2026 05:53:30 +0530
+
+### FIX 4: memory limit 10Mi is below what Node needs -> request 64Mi / limit 128Mi
+$ kubectl -n devops-final-broken set resources deploy/notes-api --requests=cpu=50m,memory=64Mi --limits=cpu=250m,memory=128Mi
+deployment.apps/notes-api resource requirements updated
+
+### SYMPTOM 5: Running but 0/1 Ready (readiness probe 404)
+$ kubectl -n devops-final-broken get pods
+NAME                         READY   STATUS    RESTARTS   AGE
+notes-api-7d84cdd88b-zmnv2   0/1     Running   0          25s
+$ kubectl -n devops-final-broken describe pod -l app=notes-api | grep 'Readiness probe failed' | tail -1
+  Warning  Unhealthy  4s (x4 over 19s)   kubelet            spec.containers{notes-api}: Readiness probe failed: HTTP probe failed with statuscode: 404
+$ kubectl -n devops-final-broken get deploy notes-api -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.httpGet.path}{"
+"}'
+/ready
+
+### FIX 5: readiness path /ready -> /readyz (the app defines /readyz)
+$ kubectl -n devops-final-broken patch deploy notes-api --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/readyz"}]'
+deployment.apps/notes-api patched
+
+### SYMPTOM 6: pod is Ready but Service has no endpoints
+$ kubectl -n devops-final-broken get pods
+NAME                         READY   STATUS    RESTARTS   AGE
+notes-api-5f8cc7df86-v6mhw   1/1     Running   0          20s
+$ kubectl -n devops-final-broken get endpoints notes-api
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME        ENDPOINTS   AGE
+notes-api   <none>      2m
+$ kubectl -n devops-final-broken get svc notes-api -o jsonpath='{.spec.selector}{"
+"}'
+{"app":"notes-app"}
+$ kubectl -n devops-final-broken get pod -l app=notes-api --show-labels
+NAME                         READY   STATUS    RESTARTS   AGE   LABELS
+notes-api-5f8cc7df86-v6mhw   1/1     Running   0          20s   app=notes-api,pod-template-hash=5f8cc7df86
+
+### FIX 6: Service selector app=notes-app -> app=notes-api
+$ kubectl -n devops-final-broken patch svc notes-api -p '{"spec":{"selector":{"app":"notes-api"}}}'
+service/notes-api patched
+$ kubectl -n devops-final-broken get endpoints notes-api
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME        ENDPOINTS           AGE
+notes-api   10.244.0.222:3000   2m3s
+
+### SYMPTOM 7: pods and Service are healthy but the Ingress returns an error
+$ curl -s -o /dev/null -w 'HTTP %{http_code}
+' -H 'Host: notes-broken.local' localhost:8082/notes
+HTTP 503
+$ kubectl -n devops-final-broken describe ingress notes-api | grep -E 'Backend|notes-api-svc|Rules' -A2 | head -8
+Rules:
+  Host                Path  Backends
+  ----                ----  --------
+  notes-broken.local  
+                      /   notes-api-svc:http (<error: services "notes-api-svc" not found>)
+Annotations:          <none>
+Events:
+$ kubectl -n devops-final-broken get svc
+NAME        TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+notes-api   ClusterIP   10.102.33.104   <none>        80/TCP    2m14s
+$ kubectl -n ingress-nginx logs deploy/ingress-nginx-controller --tail=200 | grep notes-broken | tail -2 | cut -c1-220
+
+### FIX 7: Ingress backend service notes-api-svc -> notes-api
+$ kubectl -n devops-final-broken patch ingress notes-api --type=json -p='[{"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/name","value":"notes-api"}]'
+ingress.networking.k8s.io/notes-api patched
+
+### VERIFY: end to end through the Ingress, with the key read from the Secret
+$ curl -s -w ' [HTTP %{http_code}]
+' -H 'Host: notes-broken.local' localhost:8082/
+{"message":"Hello from the broken namespace","env":"staging"} [HTTP 200]
+$ curl -s -w ' [HTTP %{http_code}]
+' -XPOST -H 'Host: notes-broken.local' -H 'x-api-key: challenge-key' -H 'content-type: application/json' -d '{"text":"fixed it"}' localhost:8082/notes
+{"id":1,"text":"fixed it","createdAt":"2026-10-07T00:24:48.123Z"} [HTTP 201]
+$ curl -s -w ' [HTTP %{http_code}]
+' -H 'Host: notes-broken.local' localhost:8082/notes
+[{"id":1,"text":"fixed it","createdAt":"2026-10-07T00:24:48.123Z"}] [HTTP 200]
+$ kubectl -n devops-final-broken get deploy,pods,svc,ep,pvc,ingress
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                        READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/notes-api   1/1     1            1           2m20s
+
+NAME                             READY   STATUS    RESTARTS   AGE
+pod/notes-api-5f8cc7df86-v6mhw   1/1     Running   0          40s
+
+NAME                TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/notes-api   ClusterIP   10.102.33.104   <none>        80/TCP    2m20s
+
+NAME                  ENDPOINTS           AGE
+endpoints/notes-api   10.244.0.222:3000   2m20s
+
+NAME                                   STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/notes-api-data   Bound    pvc-964a7173-206e-4b3b-a816-12429f72e107   1Gi        RWO            standard       <unset>                 119s
+
+NAME                                  CLASS   HOSTS                ADDRESS        PORTS   AGE
+ingress.networking.k8s.io/notes-api   nginx   notes-broken.local   192.168.49.2   80      2m20s

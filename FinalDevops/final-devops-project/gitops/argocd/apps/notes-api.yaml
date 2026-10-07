@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: notes-api
+  namespace: argocd
+spec:
+  project: final-devops
+  source:
+    repoURL: https://github.com/YOUR_USER/final-devops-project.git # <-- change me
+    targetRevision: main
+    path: helm/notes-api
+    helm:
+      valueFiles:
+        - ../../gitops/environments/prod/values.yaml   # path is relative to the chart directory
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devops-final
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions: [CreateNamespace=true]
+  ignoreDifferences:
+    - group: apps          # the HPA owns replica count, not Git
+      kind: Deployment
+      jsonPointers: [/spec/replicas]

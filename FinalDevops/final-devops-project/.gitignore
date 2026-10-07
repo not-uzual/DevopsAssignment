@@ -1,0 +1,7 @@
+node_modules
+coverage
+build-info.json
+.terraform/
+*.tfstate*
+*.tfplan
+.env*
