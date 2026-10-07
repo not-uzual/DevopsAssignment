@@ -1,0 +1,10 @@
+route:
+  receiver: log-only
+  group_by: [alertname]
+  group_wait: 5s
+  repeat_interval: 1h
+
+receivers:
+  # Demo receiver: view alerts at http://localhost:9093.
+  # In production add slack_configs / pagerduty_configs / email_configs here.
+  - name: log-only

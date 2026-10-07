@@ -1,0 +1,55 @@
+groups:
+  - name: app-alerts
+    rules:
+      - alert: AppDown
+        expr: up{job="app"} == 0
+        for: 15s
+        labels: { severity: critical }
+        annotations:
+          summary: "App is not being scraped (down)"
+
+      - alert: AppUnhealthy
+        expr: app_health_status == 0
+        for: 15s
+        labels: { severity: critical }
+        annotations:
+          summary: "App reports unhealthy (/healthz returns 503)"
+
+      - alert: HighAppCPU
+        expr: rate(process_cpu_seconds_total{job="app"}[30s]) > 0.5
+        for: 20s
+        labels: { severity: warning }
+        annotations:
+          summary: "App CPU above 50% of one core ({{ $value | humanizePercentage }})"
+
+      - alert: HighAppMemory
+        expr: process_resident_memory_bytes{job="app"} > 150 * 1024 * 1024
+        for: 20s
+        labels: { severity: warning }
+        annotations:
+          summary: "App RSS above 150 MiB ({{ $value | humanize1024 }}B)"
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_request_duration_seconds_count{status=~"5.."}[1m]))
+            / sum(rate(http_request_duration_seconds_count[1m])) > 0.2
+        for: 20s
+        labels: { severity: critical }
+        annotations:
+          summary: "More than 20% of requests are failing (5xx)"
+
+  - name: host-alerts
+    rules:
+      - alert: HostHighCPU
+        expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100) > 80
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Host CPU utilization above 80%"
+
+      - alert: HostHighMemory
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Host memory utilization above 85%"
